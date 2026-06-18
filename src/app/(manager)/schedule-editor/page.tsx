@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { deleteDoc, doc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase.client';
 import { collections } from '@/lib/firestore';
-import { DEMO_DATE } from '@/lib/constants';
+import { DEMO_DATE, SHIFT_WINDOWS } from '@/lib/constants';
+import { checkCoverage, describeMissing } from '@/lib/validators';
 import type { Employee, Location, Shift } from '@/lib/types';
 import ShiftFormModal from '@/components/ShiftFormModal';
+import CoverageSummary from '@/components/CoverageSummary';
 
 // ---------------------------------------------------------------------------
 // Week helpers
@@ -46,6 +48,44 @@ function toDisplayDate(d: Date): string {
     month: 'short',
     day: 'numeric',
   });
+}
+
+// ---------------------------------------------------------------------------
+// Per-cell coverage (reuses the pure validators)
+// ---------------------------------------------------------------------------
+
+const POOL_LOCATION_IDS = new Set<string>(Object.keys(SHIFT_WINDOWS));
+
+/** Day of week (0=Sun) for an ISO date, computed in UTC to match validators. */
+function isoWeekday(date: string): number {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+interface CellCoverage {
+  understaffed: boolean;
+  tooltip: string;
+}
+
+/**
+ * Coverage for a single grid cell. Checks every shift type present, plus
+ * synthesizes Pool Shift coverage for operating pool locations (Mon–Sat) so
+ * an entirely empty pool cell still flags as understaffed.
+ */
+function cellCoverage(locId: string, date: string, cellShifts: Shift[]): CellCoverage {
+  const shiftTypes = new Set<Shift['shiftType']>(cellShifts.map((s) => s.shiftType));
+  if (POOL_LOCATION_IDS.has(locId) && isoWeekday(date) !== 0) {
+    shiftTypes.add('Pool Shift');
+  }
+
+  const reasons: string[] = [];
+  for (const shiftType of shiftTypes) {
+    const result = checkCoverage(cellShifts, shiftType, locId, date);
+    if (!result.satisfied) {
+      reasons.push(`${shiftType}: needs ${describeMissing(result.missing)}`);
+    }
+  }
+  return { understaffed: reasons.length > 0, tooltip: reasons.join('; ') };
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +293,11 @@ export default function ScheduleEditorPage() {
         </div>
       )}
 
+      {/* Coverage & conflict summary */}
+      {!loading && (
+        <CoverageSummary shifts={shifts} employees={employees} weekDates={weekDates} />
+      )}
+
       {/* Grid */}
       {!loading && (
         <div className="overflow-x-auto rounded-xl border border-black/10 dark:border-white/10">
@@ -303,10 +348,16 @@ export default function ScheduleEditorPage() {
                   {/* Day cells */}
                   {weekDates.map((date) => {
                     const cellShifts = byCell.get(cellKey(loc.id, date)) ?? [];
+                    const coverage = cellCoverage(loc.id, date, cellShifts);
                     return (
                       <td
                         key={date}
-                        className="min-w-[176px] border-l border-black/5 px-2 py-2 align-top dark:border-white/5"
+                        title={coverage.understaffed ? coverage.tooltip : undefined}
+                        className={`min-w-[176px] border-l px-2 py-2 align-top ${
+                          coverage.understaffed
+                            ? 'border-l-black/5 bg-red-50 ring-1 ring-inset ring-red-300 dark:border-l-white/5 dark:bg-red-900/15 dark:ring-red-800'
+                            : 'border-l-black/5 dark:border-l-white/5'
+                        }`}
                       >
                         <div className="flex flex-col gap-1.5">
                           {cellShifts.map((shift) => (
@@ -317,6 +368,12 @@ export default function ScheduleEditorPage() {
                               onDelete={() => handleDelete(shift)}
                             />
                           ))}
+
+                          {coverage.understaffed && (
+                            <p className="px-0.5 text-[11px] font-medium leading-tight text-red-600 dark:text-red-400">
+                              ⚠ Understaffed — {coverage.tooltip}
+                            </p>
+                          )}
 
                           {/* Per-cell add button */}
                           <button
@@ -346,6 +403,7 @@ export default function ScheduleEditorPage() {
           initialValues={modal.initialValues}
           locations={locations}
           employees={employees}
+          shifts={shifts}
           onSaved={handleSaved}
           onClose={() => setModal(null)}
         />

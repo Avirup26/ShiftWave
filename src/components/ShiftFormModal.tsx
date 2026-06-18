@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { collection, addDoc, updateDoc, setDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase.client';
-import type { Employee, Location, RoleName, Shift } from '@/lib/types';
+import type { Employee, Issue, Location, RoleName, Shift } from '@/lib/types';
+import { checkDoubleBooking, checkEligibility, checkOverHours } from '@/lib/validators';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -46,6 +47,8 @@ interface Props {
   initialValues: Partial<Shift>;
   locations: Location[];
   employees: Employee[];
+  /** The week's shifts already loaded by the editor — used for live validation. */
+  shifts: Shift[];
   /** Called with the saved Shift after a successful Firestore write. */
   onSaved: (shift: Shift) => void;
   onClose: () => void;
@@ -60,6 +63,7 @@ export default function ShiftFormModal({
   initialValues,
   locations,
   employees,
+  shifts,
   onSaved,
   onClose,
 }: Props) {
@@ -90,6 +94,51 @@ export default function ShiftFormModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationId]);
 
+  // -------------------------------------------------------------------------
+  // Live validation (pure validators from src/lib/validators.ts)
+  // -------------------------------------------------------------------------
+
+  const selectedEmployee = employees.find((e) => e.id === employeeId);
+  const selectedLocation = locations.find((l) => l.id === locationId);
+  const timesValid = toMinutes(endTime) > toMinutes(startTime);
+
+  const liveIssues: Issue[] = [];
+  if (selectedEmployee && selectedLocation && date && timesValid) {
+    const draft: Shift = {
+      id: initialValues.id ?? '__draft__',
+      date,
+      day: '',
+      locationId,
+      locationName: selectedLocation.name,
+      shiftType,
+      role,
+      employeeId,
+      employeeName: `${selectedEmployee.firstName} ${selectedEmployee.lastName}`,
+      startTime,
+      endTime,
+      scheduledHours:
+        Math.round(((toMinutes(endTime) - toMinutes(startTime)) / 60) * 100) / 100,
+      status: initialValues.status ?? 'Scheduled',
+    };
+
+    const editingId = initialValues.id ?? '';
+    const otherShifts = shifts.filter((s) => s.id !== editingId);
+
+    const elig = checkEligibility(draft, selectedEmployee);
+    if (elig) liveIssues.push(elig);
+
+    const peersSameDay = otherShifts.filter(
+      (s) => s.employeeId === employeeId && s.date === date,
+    );
+    liveIssues.push(...checkDoubleBooking(draft, peersSameDay));
+
+    const overHours = checkOverHours(employeeId, [...otherShifts, draft], selectedEmployee);
+    if (overHours) liveIssues.push(overHours);
+  }
+
+  const hasIneligible = liveIssues.some((i) => i.kind === 'ineligible');
+  const hasDoubleBooking = liveIssues.some((i) => i.kind === 'double-booking');
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -107,6 +156,22 @@ export default function ShiftFormModal({
     const emp = employees.find((e) => e.id === employeeId);
     if (!location || !emp) {
       setError('Invalid location or employee.');
+      return;
+    }
+
+    // Blocking policy: ineligible location is a hard block (backstop — the
+    // employee dropdown already filters to eligible staff).
+    if (hasIneligible) {
+      setError(`${emp.firstName} ${emp.lastName} is not eligible for ${location.name}.`);
+      return;
+    }
+    // Double-booking is allowed but requires explicit confirmation.
+    if (
+      hasDoubleBooking &&
+      !confirm(
+        `${emp.firstName} ${emp.lastName} already has an overlapping shift that day. Save anyway?`,
+      )
+    ) {
       return;
     }
 
@@ -277,6 +342,25 @@ export default function ShiftFormModal({
             </div>
           </div>
 
+          {/* Live validation issues */}
+          {liveIssues.length > 0 && (
+            <ul className="flex flex-col gap-1.5">
+              {liveIssues.map((issue, i) => (
+                <li
+                  key={`${issue.kind}-${i}`}
+                  className={
+                    issue.severity === 'error'
+                      ? 'rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400'
+                      : 'rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
+                  }
+                >
+                  {issue.severity === 'error' ? '⛔ ' : '⚠️ '}
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+          )}
+
           {/* Error */}
           {error && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
@@ -295,10 +379,17 @@ export default function ShiftFormModal({
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || hasIneligible}
+              title={hasIneligible ? 'Employee is not eligible for this location' : undefined}
               className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600 disabled:opacity-60"
             >
-              {saving ? 'Saving…' : mode === 'add' ? 'Add Shift' : 'Save Changes'}
+              {saving
+                ? 'Saving…'
+                : hasDoubleBooking
+                  ? 'Save anyway'
+                  : mode === 'add'
+                    ? 'Add Shift'
+                    : 'Save Changes'}
             </button>
           </div>
         </form>
