@@ -1,8 +1,11 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { onSnapshot, query, where } from 'firebase/firestore';
 import { useAuth } from '@/lib/auth';
+import { collections } from '@/lib/firestore';
 
 // Nav links per role
 const EMPLOYEE_LINKS = [
@@ -29,6 +32,21 @@ export default function TopNav() {
     ? [...EMPLOYEE_LINKS, ...MANAGER_EXTRA_LINKS]
     : EMPLOYEE_LINKS;
 
+  // Live count of punches needing review — only subscribe when manager is signed in.
+  const [reviewCount, setReviewCount] = useState(0);
+
+  useEffect(() => {
+    if (!isManager || !firebaseUser) {
+      setReviewCount(0);
+      return;
+    }
+    const q = query(
+      collections.punches(),
+      where('managerReviewStatus', '==', 'Needs Review'),
+    );
+    return onSnapshot(q, (snap) => setReviewCount(snap.size));
+  }, [isManager, firebaseUser]);
+
   const handleSignOut = async () => {
     await signOut();
     router.push('/login');
@@ -51,17 +69,23 @@ export default function TopNav() {
           <div className="flex flex-1 items-center gap-1 overflow-x-auto">
             {navLinks.map(({ href, label }) => {
               const active = pathname === href || pathname.startsWith(href + '/');
+              const showBadge = href === '/review-queue' && reviewCount > 0;
               return (
                 <Link
                   key={href}
                   href={href}
-                  className={`shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  className={`relative shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition ${
                     active
                       ? 'bg-sky-50 text-sky-600 dark:bg-sky-950 dark:text-sky-400'
                       : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-50'
                   }`}
                 >
                   {label}
+                  {showBadge && (
+                    <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                      {reviewCount > 99 ? '99+' : reviewCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}

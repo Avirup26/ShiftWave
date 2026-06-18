@@ -75,6 +75,7 @@ export interface Punch {
   geofenceStatus: GeofenceStatus;
   clockInTimingStatus: TimingStatus;
   managerReviewStatus: ReviewStatus;
+  rejectReason?: string;
 }
 
 export interface TimeOffRequest {
