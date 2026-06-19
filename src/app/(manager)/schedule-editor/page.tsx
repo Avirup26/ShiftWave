@@ -6,9 +6,11 @@ import { db } from '@/lib/firebase.client';
 import { collections } from '@/lib/firestore';
 import { DEMO_DATE, SHIFT_WINDOWS } from '@/lib/constants';
 import { checkCoverage, describeMissing } from '@/lib/validators';
-import type { Employee, Location, Shift } from '@/lib/types';
+import { useAuth } from '@/lib/auth';
+import type { Employee, Issue, Location, Shift } from '@/lib/types';
 import ShiftFormModal from '@/components/ShiftFormModal';
 import CoverageSummary from '@/components/CoverageSummary';
+import AISchedulerModal from '@/components/AISchedulerModal';
 
 // ---------------------------------------------------------------------------
 // Week helpers
@@ -142,6 +144,7 @@ interface ModalState {
 // ---------------------------------------------------------------------------
 
 export default function ScheduleEditorPage() {
+  const { firebaseUser } = useAuth();
   const [locations, setLocations] = useState<Location[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -149,6 +152,11 @@ export default function ScheduleEditorPage() {
   const [loadingShifts, setLoadingShifts] = useState(true);
   const [weekMonday, setWeekMonday] = useState<Date>(() => getMondayOf(DEMO_DATE));
   const [modal, setModal] = useState<ModalState | null>(null);
+  const [aiDraft, setAiDraft] = useState<{ draftShifts: Shift[]; issues: Issue[] } | null>(
+    null,
+  );
+  const [generating, setGenerating] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // The 7 ISO date strings for the displayed week (Mon → Sun)
   const weekDates = Array.from({ length: 7 }, (_, i) => toISO(addDays(weekMonday, i)));
@@ -239,6 +247,32 @@ export default function ScheduleEditorPage() {
     setModal({ mode: 'edit', initialValues: shift });
   }
 
+  async function handleGenerate() {
+    if (!firebaseUser || generating) return;
+    setGenerating(true);
+    setAiError(null);
+    try {
+      const token = await firebaseUser.getIdToken();
+      const res = await fetch('/api/generate-schedule', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ weekDates }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error ?? 'Schedule generation failed.');
+      }
+      setAiDraft({ draftShifts: data.draftShifts ?? [], issues: data.issues ?? [] });
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'Schedule generation failed.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Derived display values
   // ---------------------------------------------------------------------------
@@ -276,6 +310,16 @@ export default function ScheduleEditorPage() {
             Next →
           </button>
 
+          {/* AI auto-scheduler */}
+          <button
+            onClick={handleGenerate}
+            disabled={generating || loading || !firebaseUser}
+            title="Draft this week's schedule with AI"
+            className="rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-60"
+          >
+            {generating ? 'Generating…' : '✨ Generate week with AI'}
+          </button>
+
           {/* Global add */}
           <button
             onClick={() => openAdd()}
@@ -285,6 +329,13 @@ export default function ScheduleEditorPage() {
           </button>
         </div>
       </div>
+
+      {/* AI generation error */}
+      {aiError && (
+        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+          {aiError}
+        </p>
+      )}
 
       {/* Loading */}
       {loading && (
@@ -406,6 +457,20 @@ export default function ScheduleEditorPage() {
           shifts={shifts}
           onSaved={handleSaved}
           onClose={() => setModal(null)}
+        />
+      )}
+
+      {/* AI draft review modal */}
+      {aiDraft && (
+        <AISchedulerModal
+          draftShifts={aiDraft.draftShifts}
+          issues={aiDraft.issues}
+          rangeLabel={rangeLabel}
+          onAccepted={() => {
+            setAiDraft(null);
+            loadShifts();
+          }}
+          onClose={() => setAiDraft(null)}
         />
       )}
     </main>
