@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase.client';
 import { collections, getById } from '@/lib/firestore';
@@ -56,29 +56,87 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
-interface ActionButtonsProps {
+interface CardActionsProps {
   onApprove: () => void;
-  onDeny: () => void;
+  onDeny: (reason: string) => void;
   busy: boolean;
 }
 
-function ActionButtons({ onApprove, onDeny, busy }: ActionButtonsProps) {
+/**
+ * Approve/Deny action area. Deny reveals an optional inline reason input
+ * before confirming, matching the punch-rejection pattern in the review queue.
+ */
+function CardActions({ onApprove, onDeny, busy }: CardActionsProps) {
+  const [denyOpen, setDenyOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function handleDenyOpen() {
+    setDenyOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  function handleConfirm() {
+    onDeny(reason.trim());
+    setDenyOpen(false);
+    setReason('');
+  }
+
+  function handleCancel() {
+    setDenyOpen(false);
+    setReason('');
+  }
+
+  if (!denyOpen) {
+    return (
+      <div className="flex shrink-0 gap-2">
+        <button
+          onClick={onApprove}
+          disabled={busy}
+          className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700 disabled:opacity-60"
+        >
+          Approve
+        </button>
+        <button
+          onClick={handleDenyOpen}
+          disabled={busy}
+          className="rounded-lg border border-black/10 px-3 py-1.5 text-xs font-medium transition hover:bg-red-50 hover:text-red-700 disabled:opacity-60 dark:border-white/10 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+        >
+          Deny
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex shrink-0 gap-2">
-      <button
-        onClick={onApprove}
-        disabled={busy}
-        className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700 disabled:opacity-60"
-      >
-        Approve
-      </button>
-      <button
-        onClick={onDeny}
-        disabled={busy}
-        className="rounded-lg border border-black/10 px-3 py-1.5 text-xs font-medium transition hover:bg-red-50 hover:text-red-700 disabled:opacity-60 dark:border-white/10 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-      >
-        Deny
-      </button>
+    <div className="flex shrink-0 flex-col gap-2">
+      <input
+        ref={inputRef}
+        type="text"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleConfirm();
+          if (e.key === 'Escape') handleCancel();
+        }}
+        placeholder="Reason (optional)"
+        className="w-48 rounded-lg border border-black/10 bg-transparent px-2.5 py-1 text-xs placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-400 dark:border-white/10 dark:placeholder:text-zinc-600"
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={handleConfirm}
+          disabled={busy}
+          className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+        >
+          Confirm Deny
+        </button>
+        <button
+          onClick={handleCancel}
+          className="rounded-lg border border-black/10 px-3 py-1.5 text-xs font-medium transition hover:bg-zinc-100 dark:border-white/10 dark:hover:bg-zinc-800"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -140,10 +198,12 @@ export default function ApprovalsPage() {
   // Time-off request handlers
   // ---------------------------------------------------------------------------
 
-  async function handleTOR(id: string, status: 'Approved' | 'Denied') {
+  async function handleTOR(id: string, status: 'Approved' | 'Denied', reason?: string) {
     setBusyId(id);
     try {
-      await updateDoc(doc(db, 'timeOffRequests', id), { status });
+      const update: { status: string; denialReason?: string } = { status };
+      if (status === 'Denied' && reason) update.denialReason = reason;
+      await updateDoc(doc(db, 'timeOffRequests', id), update);
       setTorList((prev) => prev.filter((t) => t.id !== id));
     } finally {
       setBusyId(null);
@@ -154,10 +214,12 @@ export default function ApprovalsPage() {
   // Swap request handlers
   // ---------------------------------------------------------------------------
 
-  async function handleSwap(swap: EnrichedSwap, status: 'Approved' | 'Denied') {
+  async function handleSwap(swap: EnrichedSwap, status: 'Approved' | 'Denied', reason?: string) {
     setBusyId(swap.id);
     try {
-      await updateDoc(doc(db, 'swapRequests', swap.id), { status });
+      const update: { status: string; denialReason?: string } = { status };
+      if (status === 'Denied' && reason) update.denialReason = reason;
+      await updateDoc(doc(db, 'swapRequests', swap.id), update);
 
       if (status === 'Approved' && swap.toEmployee) {
         // Reassign the shift to the replacement employee
@@ -241,10 +303,10 @@ export default function ApprovalsPage() {
                         </div>
                       </div>
 
-                      <ActionButtons
+                      <CardActions
                         busy={isBusy}
                         onApprove={() => handleTOR(tor.id, 'Approved')}
-                        onDeny={() => handleTOR(tor.id, 'Denied')}
+                        onDeny={(reason) => handleTOR(tor.id, 'Denied', reason)}
                       />
                     </div>
                   );
@@ -318,10 +380,10 @@ export default function ApprovalsPage() {
                           )}
                       </div>
 
-                      <ActionButtons
+                      <CardActions
                         busy={isBusy}
                         onApprove={() => handleSwap(swap, 'Approved')}
-                        onDeny={() => handleSwap(swap, 'Denied')}
+                        onDeny={(reason) => handleSwap(swap, 'Denied', reason)}
                       />
                     </div>
                   );

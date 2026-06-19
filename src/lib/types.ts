@@ -90,6 +90,7 @@ export interface TimeOffRequest {
   reason: string;
   status: 'Pending' | 'Approved' | 'Denied';
   createdAt: number;
+  denialReason?: string;
 }
 
 export interface SwapRequest {
@@ -99,6 +100,7 @@ export interface SwapRequest {
   toEmployeeId: string; // proposed replacement
   status: 'Pending' | 'Approved' | 'Denied';
   createdAt: number;
+  denialReason?: string;
 }
 
 // Community events carry their own coordinates + geofence radius (per the
