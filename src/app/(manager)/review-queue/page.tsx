@@ -33,13 +33,15 @@ type EnrichedPunch = Punch & {
 function getFlagReasons(punch: Punch): string {
   const reasons: string[] = [];
   if (punch.geofenceStatus === 'Outside Geofence') reasons.push('Outside Geofence');
+  if (punch.geofenceStatus === 'Location Error') reasons.push('Location Error (geofence check failed)');
   if (punch.clockInTimingStatus === 'Outside Window') reasons.push('Outside Window');
   return reasons.join(' + ') || 'Unknown';
 }
 
 function computeDistanceFt(punch: Punch, location: Location | null): number | null {
-  // Only show distance when the geofence was actually evaluated
-  if (punch.geofenceStatus === 'No Geofence') return null;
+  // Only show distance when geofence was evaluated with real coords.
+  // 'No Geofence' = ungeofenced location; 'Location Error' = coords unavailable.
+  if (punch.geofenceStatus === 'No Geofence' || punch.geofenceStatus === 'Location Error') return null;
   if (!location || location.lat === null || location.lng === null) return null;
   if (punch.clockInLat === null || punch.clockInLng === null) return null;
   const meters = haversineDistanceMeters(
@@ -83,6 +85,13 @@ function GeofenceBadge({ status }: { status: GeofenceStatus }) {
     return (
       <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400">
         Outside Geofence
+      </span>
+    );
+  }
+  if (status === 'Location Error') {
+    return (
+      <span className="inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+        Location Error
       </span>
     );
   }

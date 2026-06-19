@@ -57,6 +57,7 @@ function GeofenceBadge({ status }: { status: GeofenceStatus }) {
     'Inside Geofence': 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400',
     'Outside Geofence': 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400',
     'No Geofence': 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
+    'Location Error': 'bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400',
   };
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${styles[status]}`}>
@@ -179,8 +180,14 @@ export default function ClockPage() {
         geofenceStatus = computeGeofenceStatus(clockInLat, clockInLng, location);
       }
     } catch {
-      // Permission denied or unavailable — record the punch but flag it.
-      geofenceStatus = 'No Geofence';
+      // getCurrentPosition failed (denied, timeout, unavailable).
+      // If this location requires a geofence check, use 'Location Error' so
+      // the punch is always flagged for review — never auto-approved.
+      // If the location genuinely has no geofence requirement, fall through to
+      // the existing 'No Geofence' default.
+      if (location?.geofenceRequired) {
+        geofenceStatus = 'Location Error';
+      }
       setStatusMessage('Location unavailable — punch recorded and flagged for review.');
     }
 
@@ -190,7 +197,9 @@ export default function ClockPage() {
     );
 
     const needsReview =
-      geofenceStatus === 'Outside Geofence' || clockInTimingStatus === 'Outside Window';
+      geofenceStatus === 'Outside Geofence' ||
+      geofenceStatus === 'Location Error' ||
+      clockInTimingStatus === 'Outside Window';
 
     const punchData: Omit<Punch, 'id'> = {
       shiftId: shift.id,

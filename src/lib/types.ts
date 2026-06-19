@@ -56,7 +56,11 @@ export interface Shift {
   status: 'Scheduled' | 'Draft' | 'Cancelled';
 }
 
-export type GeofenceStatus = 'Inside Geofence' | 'Outside Geofence' | 'No Geofence';
+export type GeofenceStatus =
+  | 'Inside Geofence'
+  | 'Outside Geofence'
+  | 'No Geofence'      // geofence not required for this location (remote/event)
+  | 'Location Error';  // geofence required but getCurrentPosition failed/was denied
 export type TimingStatus = 'On Time' | 'Outside Window';
 export type ReviewStatus = 'Approved' | 'Needs Review' | 'Rejected';
 
