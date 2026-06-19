@@ -79,15 +79,25 @@ const RESPONSE_SCHEMA = {
 
 const SYSTEM_INSTRUCTION = `You are a scheduling assistant for a multi-location swim school. Produce a one-week staff schedule as JSON only — an array of shift assignments matching the provided schema.
 
-Honor these HARD rules:
-- Coverage: every Pool Shift needs >=1 Manager, >=1 Ambassador, and >=4 Instructors (see coverageRules). Events need an Event Lead, 2 Ambassadors, 2 Instructors. Remote Admin needs 1 Remote Admin.
+PRIORITY ORDER (when goals conflict, resolve strictly in this order):
+1. COVERAGE MINIMUMS come first and are NON-NEGOTIABLE. Every Pool Shift MUST have at least 1 Manager, at least 1 Ambassador, and at least 4 Instructors (see coverageRules). Events need 1 Event Lead, 2 Ambassadors, 2 Instructors; Remote Admin needs 1 Remote Admin. Satisfy these minimum role counts for EVERY operating location/day BEFORE optimizing anything else. If meeting a minimum requires an employee to exceed their avgWeeklyHours target, DO IT — coverage always wins over fairness.
+2. Fair hour/day distribution is a SECONDARY goal, pursued only AFTER every coverage minimum is already met. NEVER drop below a minimum role count (e.g. leave a shift without an Ambassador, or with fewer than 4 Instructors) in order to spread hours or rotate people. An over-hours warning is acceptable; an understaffed shift is not.
+
+HARD rules (never violate):
 - Eligibility: only assign an employee to a location whose id is in that employee's eligibleLocations.
-- Hours: keep each employee near their avgWeeklyHours and never schedule anyone over 40 hours in the week.
+- Hours: never schedule anyone over 40 hours in the week.
 - No double-booking: never give one employee two overlapping shifts on the same day.
 - Time-off: never schedule an employee on a date covered by their approved time-off.
 - Shift windows: use the provided shiftWindows for start/end times. Saturday pool shifts are mornings. Pools are closed on Sunday.
 
-Prefer assigning an employee's primary role. Cover all operating pool location/day cells for the week. Output JSON only — no prose.`;
+METHOD (follow this procedure):
+- Only output 'Pool Shift' and 'Remote Admin' assignments. Do NOT invent 'Event' shifts — no community events are scheduled this week, so producing any Event assignment is an error.
+- Work location by location, day by day. For each operating Pool Shift, FIRST lock in 1 eligible Manager + 1 eligible Ambassador + at least 4 distinct eligible Instructors. Count the Instructors — every Pool Shift must have 4 or more. Only move to the next shift once that minimum is fully met.
+- If a role has only just enough eligible staff to cover every location each day (for example, the same number of Managers or Ambassadors as there are pools), schedule those employees on EVERY operating day (Mon-Sat) to meet coverage. Their resulting over-hours warnings are acceptable and expected — coverage wins.
+- If you are running low on Instructors on a given day, reuse Instructors who are still under 40h rather than leaving a Pool Shift with fewer than 4. An over-hours warning is always preferable to an understaffed shift.
+- ONLY after EVERY pool/day minimum across the whole week is met: vary assignments across days and spread the remaining flexibility so part-time staff (8-20h targets, ~4h per shift → about 2-4 shifts each) are not all working every weeknight. Do not let this step undo any minimum.
+
+Before finishing, re-check every operating Pool Shift (all three pools, Mon-Sat) and confirm each has >=1 Manager, >=1 Ambassador, and >=4 Instructors. Prefer assigning an employee's primary role. Output JSON only — no prose.`;
 
 function unauthorized(message: string) {
   return NextResponse.json({ error: message }, { status: 401 });
@@ -184,7 +194,7 @@ export async function POST(req: Request) {
         systemInstruction: SYSTEM_INSTRUCTION,
         responseMimeType: 'application/json',
         responseSchema: RESPONSE_SCHEMA,
-        temperature: 0.3,
+        temperature: 0.15,
       },
     });
 
