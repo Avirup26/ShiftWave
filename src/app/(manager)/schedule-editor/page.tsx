@@ -7,62 +7,25 @@ import { collections } from '@/lib/firestore';
 import { DEMO_DATE, SHIFT_WINDOWS } from '@/lib/constants';
 import { checkCoverage, describeMissing } from '@/lib/validators';
 import { useAuth } from '@/lib/auth';
+import {
+  addDays,
+  getMondayOf,
+  isoWeekday,
+  toColHeader,
+  toDisplayDate,
+  toISO,
+  weekDatesFrom,
+} from '@/lib/weekHelpers';
 import type { Employee, Issue, Location, Shift } from '@/lib/types';
 import ShiftFormModal from '@/components/ShiftFormModal';
 import CoverageSummary from '@/components/CoverageSummary';
 import AISchedulerModal from '@/components/AISchedulerModal';
 
 // ---------------------------------------------------------------------------
-// Week helpers
-// ---------------------------------------------------------------------------
-
-function getMondayOf(dateStr: string): Date {
-  const d = new Date(dateStr + 'T12:00:00');
-  const day = d.getDay(); // 0=Sun…6=Sat
-  const diff = day === 0 ? -6 : 1 - day; // Sunday → −6 (prior Mon); Mon → 0; etc.
-  d.setDate(d.getDate() + diff);
-  return d;
-}
-
-function addDays(d: Date, days: number): Date {
-  const result = new Date(d);
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-/** Formats a Date as ISO 'YYYY-MM-DD' using the local calendar. */
-function toISO(d: Date): string {
-  return d.toLocaleDateString('en-CA');
-}
-
-/** Formats a Date for a compact column header: 'Mon\n6/22' */
-function toColHeader(d: Date): { weekday: string; monthDay: string } {
-  return {
-    weekday: d.toLocaleDateString('en-US', { weekday: 'short' }),
-    monthDay: d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }),
-  };
-}
-
-/** Formats a Date for the range label. */
-function toDisplayDate(d: Date): string {
-  return d.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Per-cell coverage (reuses the pure validators)
 // ---------------------------------------------------------------------------
 
 const POOL_LOCATION_IDS = new Set<string>(Object.keys(SHIFT_WINDOWS));
-
-/** Day of week (0=Sun) for an ISO date, computed in UTC to match validators. */
-function isoWeekday(date: string): number {
-  const [y, m, d] = date.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-}
 
 interface CellCoverage {
   understaffed: boolean;
@@ -159,7 +122,7 @@ export default function ScheduleEditorPage() {
   const [aiError, setAiError] = useState<string | null>(null);
 
   // The 7 ISO date strings for the displayed week (Mon → Sun)
-  const weekDates = Array.from({ length: 7 }, (_, i) => toISO(addDays(weekMonday, i)));
+  const weekDates = weekDatesFrom(weekMonday);
   const weekStartStr = weekDates[0];
   const weekEndStr = weekDates[6];
 
