@@ -19,8 +19,10 @@ export const GEOFENCE = {
   defaultPoolRadiusFt: 200,
   eventRadiusFt: 300,
   feetToMeters: 0.3048,
-  // a clock-in counts "On Time" if within this many minutes of scheduled start
-  onTimeWindowMinutes: 10,
+  // Reverse-engineered from the 45 seeded TimePunches: diffs of -10 to +5 min
+  // were labelled "On Time"; +7 min and beyond were "Outside Window".
+  // 5 minutes is the intended threshold from the original sample data.
+  onTimeWindowMinutes: 5,
 } as const;
 
 export const OVERTIME_THRESHOLD_HOURS = 40; // per week, FLSA/TX standard (ASSUMPTION)
