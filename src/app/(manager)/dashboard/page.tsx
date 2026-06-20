@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getDocs, query, where } from 'firebase/firestore';
 import { collections, getAll } from '@/lib/firestore';
-import { DEMO_DATE } from '@/lib/constants';
+import { COVERAGE_RULES, DEMO_DATE } from '@/lib/constants';
 import { validateSchedule } from '@/lib/validators';
 import {
   addDays,
@@ -13,6 +13,7 @@ import {
 } from '@/lib/weekHelpers';
 import type { Employee, Punch, Shift, ValidationReport } from '@/lib/types';
 import KpiCard from '@/components/KpiCard';
+import RadialGauge from '@/components/RadialGauge';
 import HoursBarChart from '@/components/HoursBarChart';
 import OvertimeRiskList from '@/components/OvertimeRiskList';
 import LaborCostCard from '@/components/LaborCostCard';
@@ -67,7 +68,7 @@ export default function DashboardPage() {
   }, [loadWeek]);
 
   // Run validateSchedule exactly once per (shifts, employees, weekDates) triple.
-  // The result feeds KPI cards, OvertimeRiskList, CoverageGapsList, and HoursBarChart.
+  // The result feeds KPI cards, gauges, OvertimeRiskList, CoverageGapsList, and HoursBarChart.
   const report = useMemo<ValidationReport>(() => {
     if (loadingEmployees || loadingWeek || employees.length === 0) {
       return { issues: [], coverage: [], ok: true };
@@ -80,17 +81,61 @@ export default function DashboardPage() {
   // ---------------------------------------------------------------------------
 
   const activeShifts = shifts.filter((s) => s.status !== 'Cancelled');
-
   const totalScheduledHours = activeShifts.reduce((sum, s) => sum + s.scheduledHours, 0);
-
   const employeesScheduled = new Set(activeShifts.map((s) => s.employeeId)).size;
-
   const coverageGapCount = report.coverage.filter((c) => !c.satisfied).length;
-
   const needsReviewCount = punches.filter((p) => p.managerReviewStatus === 'Needs Review').length;
-
   const overtimeIssues = report.issues.filter((i) => i.kind === 'over-hours');
   const overtimeCount = overtimeIssues.filter((i) => i.severity === 'error').length;
+
+  // ---------------------------------------------------------------------------
+  // Gauge 1 — Coverage completion
+  // Compute total required role-slots vs filled role-slots from report.coverage.
+  // For each CoverageResult, required = sum of COVERAGE_RULES[shiftType][role].
+  // filled = required - sum(need - have) for each missing entry.
+  // ---------------------------------------------------------------------------
+
+  const coverageGauge = useMemo(() => {
+    let totalRequired = 0;
+    let totalFilled = 0;
+
+    for (const entry of report.coverage) {
+      const rules = COVERAGE_RULES[entry.shiftType] as Record<string, number>;
+      const required = Object.values(rules).reduce((s, n) => s + n, 0);
+      const deficit = entry.missing.reduce((s, m) => s + (m.need - m.have), 0);
+      totalRequired += required;
+      totalFilled += required - deficit;
+    }
+
+    const pct =
+      totalRequired === 0 ? 100 : Math.round((totalFilled / totalRequired) * 100);
+    const color =
+      pct >= 95 ? '#10b981' : pct >= 80 ? '#f59e0b' : '#ef4444';
+    const badgeColor: 'green' | 'amber' | 'red' =
+      pct >= 95 ? 'green' : pct >= 80 ? 'amber' : 'red';
+
+    return { pct, totalRequired, totalFilled, color, badgeColor };
+  }, [report]);
+
+  // ---------------------------------------------------------------------------
+  // Gauge 2 — Punch review status
+  // Two segments: approved (green) + flagged/all-non-approved (amber).
+  // Center shows the raw "Needs Review" count; sub shows "X approved · Y flagged".
+  // ---------------------------------------------------------------------------
+
+  const punchGauge = useMemo(() => {
+    const total = punches.length;
+    const approved = punches.filter((p) => p.managerReviewStatus === 'Approved').length;
+    const needsReview = punches.filter(
+      (p) => p.managerReviewStatus === 'Needs Review',
+    ).length;
+    const flaggedAll = total - approved; // Needs Review + Rejected
+
+    const approvedProp = total === 0 ? 0 : approved / total;
+    const flaggedProp = total === 0 ? 0 : flaggedAll / total;
+
+    return { total, approved, needsReview, flaggedAll, approvedProp, flaggedProp };
+  }, [punches]);
 
   // ---------------------------------------------------------------------------
   // Loading state
@@ -132,7 +177,7 @@ export default function DashboardPage() {
       {!loading && (
         <>
           {/* KPI cards */}
-          <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <KpiCard
               label="Scheduled Hours"
               value={totalScheduledHours.toFixed(1)}
@@ -157,6 +202,71 @@ export default function DashboardPage() {
             />
           </div>
 
+          {/* Radial gauges */}
+          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Gauge 1 — Coverage completion */}
+            <RadialGauge
+              title="Coverage Completion"
+              centerValue={`${coverageGauge.pct}%`}
+              centerSub={
+                coverageGauge.totalRequired === 0
+                  ? 'no shifts this week'
+                  : `${coverageGauge.totalFilled} of ${coverageGauge.totalRequired} role-slots`
+              }
+              segments={[
+                {
+                  proportion: coverageGauge.totalRequired === 0 ? 1 : coverageGauge.totalFilled / coverageGauge.totalRequired,
+                  color: coverageGauge.color,
+                  legendLabel: `Filled (${coverageGauge.pct}%)`,
+                },
+              ]}
+              badge={{
+                label: coverageGauge.pct >= 95 ? 'On track' : coverageGauge.pct >= 80 ? 'Partial' : 'Understaffed',
+                color: coverageGauge.badgeColor,
+              }}
+              ariaLabel={`Coverage completion: ${coverageGauge.pct}% — ${coverageGauge.totalFilled} of ${coverageGauge.totalRequired} role-slots staffed this week`}
+            />
+
+            {/* Gauge 2 — Punch review status */}
+            <RadialGauge
+              title="Punch Review Status"
+              centerValue={punchGauge.total === 0 ? '—' : String(punchGauge.needsReview)}
+              centerSub={
+                punchGauge.total === 0
+                  ? 'no punches this week'
+                  : `needs review`
+              }
+              segments={
+                punchGauge.total === 0
+                  ? [{ proportion: 1, color: '#d4d4d8', legendLabel: 'No punches' }]
+                  : [
+                      {
+                        proportion: punchGauge.approvedProp,
+                        color: '#10b981',
+                        legendLabel: `Approved (${punchGauge.approved})`,
+                      },
+                      {
+                        proportion: punchGauge.flaggedProp,
+                        color: '#f59e0b',
+                        legendLabel: `Flagged (${punchGauge.flaggedAll})`,
+                      },
+                    ]
+              }
+              badge={
+                punchGauge.needsReview > 0
+                  ? { label: `${punchGauge.needsReview} pending`, color: 'amber' }
+                  : punchGauge.total > 0
+                  ? { label: 'All reviewed', color: 'green' }
+                  : undefined
+              }
+              ariaLabel={
+                punchGauge.total === 0
+                  ? 'Punch review status: no punches this week'
+                  : `Punch review status: ${punchGauge.approved} approved, ${punchGauge.needsReview} needs review, ${punchGauge.flaggedAll - punchGauge.needsReview} rejected, out of ${punchGauge.total} total punches`
+              }
+            />
+          </div>
+
           {/* Hours per employee bar chart */}
           <section className="mb-8 rounded-xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-zinc-950">
             <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
@@ -177,7 +287,6 @@ export default function DashboardPage() {
 
           {/* Overtime risk + Labor cost — side by side on wide screens */}
           <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {/* Overtime risk */}
             <section className="rounded-xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-zinc-950">
               <div className="mb-3 flex items-baseline justify-between gap-2">
                 <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
@@ -190,17 +299,16 @@ export default function DashboardPage() {
                 )}
               </div>
               <p className="mb-3 text-xs text-zinc-400 dark:text-zinc-600">
-                Red = over {40}h (FLSA threshold) · Amber = over personal target.
+                Red = over 40h (FLSA threshold) · Amber = over personal target.
                 Same data as the red bars in the chart above.
               </p>
               <OvertimeRiskList issues={report.issues} />
             </section>
 
-            {/* Labor cost estimate */}
             <LaborCostCard shifts={shifts} punches={punches} />
           </div>
 
-          {/* Coverage gaps */}
+          {/* Coverage gaps detail */}
           <section className="rounded-xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-zinc-950">
             <div className="mb-3 flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
@@ -213,8 +321,8 @@ export default function DashboardPage() {
               )}
             </div>
             <p className="mb-3 text-xs text-zinc-400 dark:text-zinc-600">
-              Shifts that do not meet minimum role coverage requirements.
-              Go to the Schedule Editor to fix gaps.
+              Shifts that do not meet minimum role coverage requirements. Go to the Schedule Editor
+              to fix gaps.
             </p>
             <CoverageGapsList coverage={report.coverage} />
           </section>
