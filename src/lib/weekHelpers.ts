@@ -1,3 +1,13 @@
+/**
+ * Minutes since local midnight for a wall-clock 'HH:MM' string (e.g. '16:30' → 990).
+ * Single canonical home for the minutes-since-midnight convention used across the
+ * app (clock-in timing, dashboard actual-hours, payroll export).
+ */
+export function minutesSinceMidnight(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
 /** Given any ISO date string, returns the Monday of that week at noon local time. */
 export function getMondayOf(dateStr: string): Date {
   const d = new Date(dateStr + 'T12:00:00');

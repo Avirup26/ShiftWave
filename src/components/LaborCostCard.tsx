@@ -1,10 +1,6 @@
 import { DEFAULT_HOURLY_RATE } from '@/lib/constants';
+import { minutesSinceMidnight } from '@/lib/weekHelpers';
 import type { Punch, Shift } from '@/lib/types';
-
-function toMinutes(t: string): number {
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
-}
 
 interface LaborCostCardProps {
   shifts: Shift[];
@@ -27,7 +23,7 @@ export default function LaborCostCard({ shifts, punches }: LaborCostCardProps) {
     .reduce((sum, p) => {
       const shift = shiftsById.get(p.shiftId);
       if (!shift) return sum;
-      const hours = (toMinutes(p.clockOut!) - toMinutes(p.clockIn!)) / 60;
+      const hours = (minutesSinceMidnight(p.clockOut!) - minutesSinceMidnight(p.clockIn!)) / 60;
       return sum + hours * (DEFAULT_HOURLY_RATE[shift.role] ?? 0);
     }, 0);
 

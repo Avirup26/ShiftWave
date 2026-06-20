@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "tsc src/lib/gusto.ts src/lib/weekHelpers.ts src/lib/constants.ts src/lib/gusto.test.ts --module commonjs --target es2020 --moduleResolution node --outDir .tmp-test --skipLibCheck --esModuleInterop && node --test .tmp-test"
   },
   "dependencies": {
     "@google/genai": "^2.9.0",

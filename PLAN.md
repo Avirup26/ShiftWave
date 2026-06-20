@@ -516,18 +516,28 @@ export function validateSchedule(shifts, employees): ValidationReport;          
 
 ## PHASE 8 — Gusto payroll export
 
-**Build** `src/lib/gusto.ts` + a button on `/payroll`:
-- Manager picks a pay period (default the week, Mon–Sun).
-- Sum hours per employee from **approved** punches (`clockOut − clockIn`). Hours over 40/week → overtime column. Approved time-off → PTO.
-- Generate CSV with columns: `First Name, Last Name, Employee ID, Regular Hours, Overtime Hours, PTO Hours`. Round to 2 decimals.
-- Trigger a client-side download. (Gusto's importer matches employees by name/ID and maps Regular/Overtime/PTO hour types on upload.)
-- Show which punches were excluded (still `Needs Review`/`Rejected`).
+> **Canonical format = the `GustoExportSample` sheet** in `data/scheduling_timekeeping_demo_sample_data.xlsx`. The earlier aggregated/per-employee description in this section (with a PTO column) is **superseded** — it predated grounding the format in the actual sample sheet. Build to the sheet; where the two disagree, the sheet wins.
+
+**Build** `src/lib/gusto.ts` (pure, no Firebase/React — validators.ts pattern) + `/payroll`:
+- Manager picks a pay week (Mon–Sun), defaulting to the demo week (`DEMO_DATE`, Mon 2026-06-22).
+- **One row per punch** (not aggregated per employee), with these columns **in this exact order** (verified against the sheet):
+  `Employee ID, Employee Name, Date, Clock In, Clock Out, Total Hours, Location, Regular Hours, Overtime Hours, Notes`
+  - `Total Hours` = `(clockOut − clockIn)` minutes ÷ 60, rounded to 2 decimals (e.g. `16:25→20:30` = `4.08`), via the shared `minutesSinceMidnight` helper.
+  - `Location` = the location **code** (`ARL`/`GP`/`MAN`), as the sheet emits.
+  - `Date` = ISO `YYYY-MM-DD` (the sheet stores Excel serials like `46195`; we emit the readable date).
+  - `Notes` = `"${managerReviewStatus}; ${geofenceStatus}; ${clockInTimingStatus}"`.
+  - `Regular`/`Overtime` = per-employee-per-week 40h split, accumulated on **unrounded minutes** and rounded only at emit, so `Regular + Overtime` always equals the displayed `Total Hours`. (All seed punches are < 40h, so Overtime is 0 across the board; the split is proven with a synthetic >40h case in `src/lib/gusto.test.ts`, run via `npm test`.)
+- **Approval gate (our addition).** The sample sheet is a raw dump that includes `Needs Review` rows; our export only includes punches with `managerReviewStatus === 'Approved'` and both clock times. Excluded punches are surfaced as a count + list, with a link to the Phase 5 `/review-queue` so disputed time can't be silently paid or underpaid.
+- **PTO is out of scope for this CSV** (the sheet has no PTO column). Approved paid time off is tracked in `/approvals` and would map to a **separate Gusto PTO import** — deliberately scoped out, not missing. The UI states this.
+- Client-side CSV download (Blob + anchor), no new dependency, no server route (no secret involved), proper CSV escaping. Manager-only via the `(manager)` route-group `layout.tsx` guard.
 
 **Acceptance criteria**
-- [ ] Downloaded CSV opens cleanly and only includes approved hours.
-- [ ] Overtime split at 40h/week is correct.
+- [ ] Page gated to managers; week selector defaults to the demo week.
+- [ ] Export matches the `GustoExportSample` columns/format/order; hours computed from real punch times.
+- [ ] Downloaded CSV opens cleanly and only includes approved hours; excluded punches surfaced with a review-queue link.
+- [ ] Overtime split at 40h/week is correct (proven by `npm test`).
 
-**Commit:** `feat: Gusto-compatible payroll CSV export`
+**Commit:** `feat: gusto payroll export`
 
 ---
 
