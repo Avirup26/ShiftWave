@@ -62,6 +62,7 @@ export default function SchedulePage() {
   const { employee } = useAuth();
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   // Default to the demo week (week of 2026-06-22) so seeded data is visible
   // regardless of the real calendar date.
   const [weekMonday, setWeekMonday] = useState<Date>(() => weekStart(DEMO_DATE));
@@ -74,10 +75,17 @@ export default function SchedulePage() {
       where('employeeId', '==', employee.id),
     );
 
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setShifts(snap.docs.map((d) => d.data()));
-      setLoading(false);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => {
+        setShifts(snap.docs.map((d) => d.data()));
+        setLoading(false);
+      },
+      (err) => {
+        setError(err.message);
+        setLoading(false);
+      },
+    );
 
     return unsubscribe;
   }, [employee]);
@@ -138,6 +146,13 @@ export default function SchedulePage() {
           </button>
         </div>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
+          {error}
+        </div>
+      )}
 
       {/* Loading */}
       {loading && (

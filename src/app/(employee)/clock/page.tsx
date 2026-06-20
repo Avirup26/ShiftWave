@@ -214,7 +214,7 @@ export default function ClockPage() {
       clockInLng,
       geofenceStatus,
       clockInTimingStatus,
-      managerReviewStatus: needsReview ? 'Needs Review' : 'Approved',
+      managerReviewStatus: 'Needs Review',
     };
 
     const docRef = await addDoc(collection(db, 'punches'), punchData);
@@ -228,7 +228,7 @@ export default function ClockPage() {
       setStatusMessage(
         needsReview
           ? 'Clocked in — punch flagged for manager review.'
-          : 'Clocked in successfully.',
+          : 'Clocked in — pending manager approval.',
       );
     }
     setActionShiftId(null);

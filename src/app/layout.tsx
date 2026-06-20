@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import TopNav from "@/components/TopNav";
@@ -19,6 +19,10 @@ export const metadata: Metadata = {
   description: "Scheduling & timekeeping for a multi-location swim school",
 };
 
+export const viewport: Viewport = {
+  themeColor: "#0ea5e9",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -34,6 +38,12 @@ export default function RootLayout({
           <TopNav />
           {children}
         </AuthProvider>
+        {/* Register the network-first no-op service worker for PWA installability. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js');})}`,
+          }}
+        />
       </body>
     </html>
   );

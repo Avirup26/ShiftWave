@@ -1,0 +1,165 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    /** True when the request carries a valid Firebase Auth token. */
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    /**
+     * Returns the users/{authUid} doc data — the login-identity record written
+     * by link-users.mjs / the Admin SDK. Shape: { employeeId, appRole, email }.
+     * appRole is NOT a token claim; it must be read from Firestore.
+     */
+    function profile() {
+      return get(/databases/$(db)/documents/users/$(request.auth.uid)).data;
+    }
+
+    /** The roster ID (e.g. 'I001') belonging to the signed-in user. */
+    function myEmployeeId() {
+      return profile().employeeId;
+    }
+
+    /**
+     * True when the signed-in user has appRole == 'manager'.
+     * signedIn() must be true first (short-circuit prevents profile() from
+     * running against a null auth.uid).
+     */
+    function isManager() {
+      return signedIn() && profile().appRole == 'manager';
+    }
+
+    // -----------------------------------------------------------------------
+    // users/{uid}
+    // Login-identity docs provisioned by the Admin SDK only. Each user reads
+    // their own; managers can read any (e.g. for admin lookups). No client
+    // writes ever — the Admin SDK is the sole writer.
+    // Note: reading users/{auth.uid} inside isManager() always passes the
+    // first condition (request.auth.uid == uid), so there is no circular
+    // dependency.
+    // -----------------------------------------------------------------------
+    match /users/{uid} {
+      allow read:  if request.auth.uid == uid || isManager();
+      allow write: if false;
+    }
+
+    // -----------------------------------------------------------------------
+    // employees/{id}
+    // Roster docs (keyed by employee ID like 'I001'). Readable by any
+    // authenticated user — the employee picker and schedule page both need
+    // all-employee reads. Writable only by managers.
+    // -----------------------------------------------------------------------
+    match /employees/{id} {
+      allow read:  if signedIn();
+      allow write: if isManager();
+    }
+
+    // -----------------------------------------------------------------------
+    // locations/{id}
+    // Site configuration. All authenticated users need it (clock-in geofence
+    // lookup, review queue, schedule editor). Managers write it via seeding.
+    // -----------------------------------------------------------------------
+    match /locations/{id} {
+      allow read:  if signedIn();
+      allow write: if isManager();
+    }
+
+    // -----------------------------------------------------------------------
+    // roles/{id}
+    // Role reference data. Same read/write pattern as locations.
+    // -----------------------------------------------------------------------
+    match /roles/{id} {
+      allow read:  if signedIn();
+      allow write: if isManager();
+    }
+
+    // -----------------------------------------------------------------------
+    // shifts/{id}
+    // The schedule. Readable by all authenticated users — employees query only
+    // their own shifts in the UI (the rule mirrors the access-model spec: any
+    // signed-in user may read shifts). Only managers create/edit/delete shifts.
+    // -----------------------------------------------------------------------
+    match /shifts/{id} {
+      allow read:  if signedIn();
+      allow write: if isManager();
+    }
+
+    // -----------------------------------------------------------------------
+    // punches/{id}
+    // Time-punch records — the highest-integrity collection.
+    //
+    // READ:   Managers see all punches (review queue, dashboard, payroll).
+    //         Employees see only their own (clock page).
+    //
+    // CREATE: Employees clock in for themselves only.
+    //         managerReviewStatus must NOT be 'Approved' on create — initial
+    //         status is always 'Needs Review'. Only a manager may flip it to
+    //         'Approved' via an update. This is the integrity gate that prevents
+    //         a client from bypassing the geofence/timing check.
+    //
+    // UPDATE: Managers update any field (approve / reject via review queue).
+    //         Employees may update their own punch (clock-out writes 'clockOut';
+    //         the mirror-ID update after addDoc writes the 'id' field) but may
+    //         NOT change managerReviewStatus — only the value already stored
+    //         is allowed through.
+    //
+    // DELETE: Never allowed from the client.
+    // -----------------------------------------------------------------------
+    match /punches/{id} {
+      allow read: if signedIn()
+        && (isManager() || resource.data.employeeId == myEmployeeId());
+
+      allow create: if signedIn()
+        && request.resource.data.employeeId == myEmployeeId()
+        && request.resource.data.managerReviewStatus != 'Approved';
+
+      allow update: if isManager()
+        || (signedIn()
+          && resource.data.employeeId == myEmployeeId()
+          && request.resource.data.managerReviewStatus
+             == resource.data.managerReviewStatus);
+
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------------
+    // timeOffRequests/{id}
+    // Employees create and read only their own requests; managers read all
+    // (approvals page) and update status (approve / deny).
+    // -----------------------------------------------------------------------
+    match /timeOffRequests/{id} {
+      allow read: if signedIn()
+        && (isManager() || resource.data.employeeId == myEmployeeId());
+
+      allow create: if signedIn()
+        && request.resource.data.employeeId == myEmployeeId();
+
+      allow update: if isManager();
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------------------------
+    // swapRequests/{id}
+    // The requesting employee (fromEmployeeId) and the proposed replacement
+    // (toEmployeeId) may both read the request. Only the requester creates;
+    // only managers update (approve / deny) which also reassigns the shift.
+    // -----------------------------------------------------------------------
+    match /swapRequests/{id} {
+      allow read: if signedIn()
+        && (isManager()
+          || resource.data.fromEmployeeId == myEmployeeId()
+          || resource.data.toEmployeeId   == myEmployeeId());
+
+      allow create: if signedIn()
+        && request.resource.data.fromEmployeeId == myEmployeeId();
+
+      allow update: if isManager();
+      allow delete: if false;
+    }
+  }
+}

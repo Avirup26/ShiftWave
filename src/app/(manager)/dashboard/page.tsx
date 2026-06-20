@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [loadingWeek, setLoadingWeek] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const weekDates = useMemo(() => weekDatesFrom(weekMonday), [weekMonday]);
   const weekStart = weekDates[0];
@@ -40,27 +41,36 @@ export default function DashboardPage() {
   useEffect(() => {
     getAll(collections.employees())
       .then(setEmployees)
+      .catch((e: unknown) =>
+        setError(e instanceof Error ? e.message : 'Failed to load employees'),
+      )
       .finally(() => setLoadingEmployees(false));
   }, []);
 
   // Load shifts + punches for the selected week
   const loadWeek = useCallback(async () => {
     setLoadingWeek(true);
-    const [shiftSnap, punchSnap] = await Promise.all([
-      getDocs(
-        query(collections.shifts(), where('date', '>=', weekStart), where('date', '<=', weekEnd)),
-      ),
-      getDocs(
-        query(
-          collections.punches(),
-          where('date', '>=', weekStart),
-          where('date', '<=', weekEnd),
+    setError(null);
+    try {
+      const [shiftSnap, punchSnap] = await Promise.all([
+        getDocs(
+          query(collections.shifts(), where('date', '>=', weekStart), where('date', '<=', weekEnd)),
         ),
-      ),
-    ]);
-    setShifts(shiftSnap.docs.map((d) => d.data()));
-    setPunches(punchSnap.docs.map((d) => d.data()));
-    setLoadingWeek(false);
+        getDocs(
+          query(
+            collections.punches(),
+            where('date', '>=', weekStart),
+            where('date', '<=', weekEnd),
+          ),
+        ),
+      ]);
+      setShifts(shiftSnap.docs.map((d) => d.data()));
+      setPunches(punchSnap.docs.map((d) => d.data()));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to load week data');
+    } finally {
+      setLoadingWeek(false);
+    }
   }, [weekStart, weekEnd]);
 
   useEffect(() => {
@@ -166,6 +176,13 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
+          {error}
+        </div>
+      )}
 
       {/* Loading spinner */}
       {loading && (
