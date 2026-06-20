@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { onSnapshot, query, where } from 'firebase/firestore';
 import { useAuth } from '@/lib/auth';
 import { collections } from '@/lib/firestore';
+import ThemeToggle from '@/components/ThemeToggle';
 
 // Nav links per role
 const EMPLOYEE_LINKS = [
@@ -94,6 +95,7 @@ export default function TopNav() {
 
         {/* Right side */}
         <div className="ml-auto flex shrink-0 items-center gap-3">
+          <ThemeToggle />
           {!loading && firebaseUser ? (
             <>
               {employee && (
