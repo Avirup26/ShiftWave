@@ -5,7 +5,20 @@ import { query, where, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '@/lib/auth';
 import { collections } from '@/lib/firestore';
 import { DEMO_DATE } from '@/lib/constants';
+import { buildScheduleIcs } from '@/lib/ics';
 import type { Shift } from '@/lib/types';
+
+// Client-side download via Blob + anchor — no server route, no dependency,
+// mirrors the Gusto CSV export in /payroll.
+function downloadIcs(filename: string, ics: string) {
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 // ---------------------------------------------------------------------------
 // Week helpers
@@ -143,6 +156,21 @@ export default function SchedulePage() {
             className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium transition hover:bg-zinc-50 dark:border-white/10 dark:bg-zinc-900 dark:hover:bg-zinc-800"
           >
             Next →
+          </button>
+          <button
+            onClick={() => {
+              if (!employee) return;
+              const ics = buildScheduleIcs(
+                shifts.filter((s) => s.status !== 'Cancelled'),
+                `${employee.firstName} ${employee.lastName}`,
+              );
+              downloadIcs('shiftwave-schedule.ics', ics);
+            }}
+            disabled={!employee || shifts.length === 0}
+            title="Download all of your upcoming shifts as a calendar file you can import into Google Calendar, Apple Calendar, or Outlook"
+            className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+          >
+            📅 Export to Calendar
           </button>
         </div>
       </div>

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsc src/lib/gusto.ts src/lib/weekHelpers.ts src/lib/constants.ts src/lib/validators.ts src/lib/geofence.ts src/lib/anomalies.ts src/lib/swapMatch.ts src/lib/gusto.test.ts src/lib/anomalies.test.ts src/lib/swapMatch.test.ts --module commonjs --target es2020 --moduleResolution node --outDir .tmp-test --skipLibCheck --esModuleInterop && node --test .tmp-test"
+    "test": "tsc src/lib/gusto.ts src/lib/weekHelpers.ts src/lib/constants.ts src/lib/validators.ts src/lib/geofence.ts src/lib/anomalies.ts src/lib/swapMatch.ts src/lib/ics.ts src/lib/gusto.test.ts src/lib/anomalies.test.ts src/lib/swapMatch.test.ts src/lib/ics.test.ts --module commonjs --target es2020 --moduleResolution node --outDir .tmp-test --skipLibCheck --esModuleInterop && node --test .tmp-test"
   },
   "dependencies": {
     "@google/genai": "^2.9.0",

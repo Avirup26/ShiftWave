@@ -47,7 +47,7 @@ Only **two Firebase Auth accounts** exist in the demo (one manager, one instruct
 
 | Page | Route | What it does |
 |------|-------|--------------|
-| **My Schedule** | `/schedule` | Real-time list of your shifts for the selected week, grouped by day |
+| **My Schedule** | `/schedule` | Real-time list of your shifts for the selected week, grouped by day. "Export to Calendar" downloads an `.ics` file (all upcoming shifts) for one-way import into Google Calendar, Apple Calendar, or Outlook — no OAuth required |
 | **Clock In/Out** | `/clock` | Pick a demo-week shift, clock in with geolocation, clock out when done. Geofence + timing status computed client-side; all new punches land as `Needs Review` until a manager approves |
 | **Requests** | `/requests` | Submit time-off or shift-swap requests; view history and status |
 
@@ -432,7 +432,7 @@ What would come next in a production version:
 - Server-side geofence validation + App Check (anti-spoofing)
 - Push / email notifications
 - Google SSO
-- Google Sheets / Calendar sync
+- Two-way Google Sheets / Calendar **sync** (live, OAuth-based) — a one-way Google Calendar **export** (`.ics` download from `/schedule`) already ships; see [Features](#features)
 - Recurring shift templates
 - Audit log + payroll-period locking
 - Direct Gusto API integration
