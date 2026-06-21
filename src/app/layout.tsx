@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import TopNav from "@/components/TopNav";
+import AssistantWidget from "@/components/AssistantWidget";
 import { AuthProvider } from "@/lib/auth";
 import { ThemeProvider } from "@/lib/theme";
 
@@ -48,6 +49,7 @@ export default function RootLayout({
           <AuthProvider>
             <TopNav />
             {children}
+            <AssistantWidget />
           </AuthProvider>
         </ThemeProvider>
         {/* Register the network-first no-op service worker for PWA installability. */}
