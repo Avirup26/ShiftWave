@@ -27,6 +27,16 @@ export default function AssistantWidget() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, sending]);
 
+  // Reset the conversation whenever the signed-in user changes (sign out / sign
+  // in as someone else) so one account's chat never leaks into another's.
+  const uid = firebaseUser?.uid ?? null;
+  useEffect(() => {
+    setMessages([]);
+    setInput('');
+    setError(null);
+    setOpen(false);
+  }, [uid]);
+
   // Only render for signed-in users.
   if (loading || !firebaseUser) return null;
 

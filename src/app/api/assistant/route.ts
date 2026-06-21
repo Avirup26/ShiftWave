@@ -6,6 +6,7 @@ import { getGeminiClient, GEMINI_MODEL } from '@/lib/gemini';
 import { DEMO_DATE } from '@/lib/constants';
 import { getMondayOf, weekDatesFrom } from '@/lib/weekHelpers';
 import { punchMinutes, round2 } from '@/lib/payHours';
+import { hourlyRateForRole, TAX_RATES } from '@/lib/pay';
 import type { Employee, Punch, Shift, SwapRequest, TimeOffRequest, UserIdentity } from '@/lib/types';
 
 // firebase-admin does not run on the Edge runtime (§0.5).
@@ -96,6 +97,15 @@ export async function POST(req: Request) {
     myHoursThisWeek: hoursThisWeek,
     myPendingTimeOff: myTimeOff.filter((r) => r.status === 'Pending').map((r) => ({ start: r.startDate, end: r.endDate, reason: r.reason })),
     myPendingSwaps: mySwaps.filter((r) => r.status === 'Pending').length,
+    // Simulated pay model (matches the /pay page exactly) so you can answer
+    // "how much would I make for N hours" yourself.
+    pay: {
+      hourlyRate: employee ? hourlyRateForRole(employee.primaryRole) : null,
+      taxRates: TAX_RATES, // { federal, socialSecurity, medicare } as fractions
+      grossFormula: 'gross = hours * hourlyRate',
+      takeHomeFormula: 'takeHome = gross - gross*(federal + socialSecurity + medicare)',
+      note: 'Simulated estimate only — not real payroll. Only manager-approved hours count toward actual pay.',
+    },
   };
 
   // --- Manager-only snapshot ---
@@ -123,6 +133,7 @@ ${JSON.stringify(userContext)}
 
 GUIDELINES:
 - Be concise and conversational. Use the live context to answer data questions (e.g. "what are my hours this week", "when do I work next", "do I have pending requests").
+- PAY MATH: You CAN compute simulated pay yourself using context.pay. For a given number of hours: gross = hours × hourlyRate; total tax = gross × (federal + socialSecurity + medicare); take-home = gross − total tax. Show the gross and take-home, round to 2 decimals, and note it's a simulated estimate. Example: 40h at $18/hr → gross $720.00, take-home ≈ $574.92. Never refuse a pay calculation when hourlyRate is present in context.
 - For "how do I…" questions, explain the steps and name the page to use.
 - Only discuss ShiftWave. If asked something unrelated, briefly say you can only help with ShiftWave.
 - Never invent data not present in the context. If you don't have it, say so and point them to the right page.
