@@ -12,8 +12,8 @@
 // else is returned as `excluded` so the UI can surface it.
 
 import type { Employee, Punch } from './types';
-import { OVERTIME_THRESHOLD_HOURS } from './constants';
 import { minutesSinceMidnight } from './weekHelpers';
+import { splitRegularOvertime } from './payHours';
 
 /** Header order — matches the GustoExportSample sheet exactly. */
 export const GUSTO_COLUMNS = [
@@ -28,8 +28,6 @@ export const GUSTO_COLUMNS = [
   'Overtime Hours',
   'Notes',
 ] as const;
-
-const OVERTIME_THRESHOLD_MINUTES = OVERTIME_THRESHOLD_HOURS * 60;
 
 /** One exportable CSV row. Hours are already rounded to 2 decimals for display. */
 export interface GustoRow {
@@ -129,18 +127,9 @@ export function buildGustoRows(
         minutesSinceMidnight(a.clockIn!) - minutesSinceMidnight(b.clockIn!),
     );
 
-    let cumulativeMinutes = 0; // raw, unrounded — this is the key to no drift
-    for (const p of empPunches) {
-      const totalMin = minutesSinceMidnight(p.clockOut!) - minutesSinceMidnight(p.clockIn!);
-      const regularRoom = Math.max(0, OVERTIME_THRESHOLD_MINUTES - cumulativeMinutes);
-      const regularMin = Math.min(totalMin, regularRoom);
-      cumulativeMinutes += totalMin;
-
-      const totalHours = round2(totalMin / 60);
-      const regularHours = round2(regularMin / 60);
-      // Subtract the two emitted 2-decimal values so the row always reconciles.
-      const overtimeHours = round2(totalHours - regularHours);
-
+    const splits = splitRegularOvertime(empPunches);
+    empPunches.forEach((p, i) => {
+      const { totalHours, regularHours, overtimeHours } = splits[i];
       rows.push({
         employeeId,
         employeeName: employeeName(employeesById, employeeId),
@@ -153,7 +142,7 @@ export function buildGustoRows(
         overtimeHours,
         notes: `${p.managerReviewStatus}; ${p.geofenceStatus}; ${p.clockInTimingStatus}`,
       });
-    }
+    });
   }
 
   // Final display order: date → location → clock-in.

@@ -12,6 +12,8 @@ import ThemeToggle from '@/components/ThemeToggle';
 const EMPLOYEE_LINKS = [
   { href: '/schedule', label: 'Schedule' },
   { href: '/clock', label: 'Clock In/Out' },
+  { href: '/timecard', label: 'Timecard' },
+  { href: '/pay', label: 'Pay' },
   { href: '/requests', label: 'Requests' },
 ] as const;
 
