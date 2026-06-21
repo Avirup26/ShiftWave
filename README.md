@@ -1,8 +1,8 @@
 # ShiftWave
 
-Scheduling and timekeeping for a multi-location swim school (~23 staff). ShiftWave replaces When I Work / Teams Shifts for a proof-of-concept demo: employees view schedules, clock in/out with geofencing, and submit time-off and swap requests; managers build schedules, approve requests, review flagged punches, auto-generate schedules with AI, monitor a live dashboard, and export payroll to Gusto.
+Scheduling and timekeeping for a multi-location swim school (~23 staff). ShiftWave replaces When I Work / Teams Shifts for a proof-of-concept demo: employees view schedules, clock in/out with geofencing, view a day-by-day timecard and an estimated paycheck, and submit time-off and swap requests (with an AI-ranked replacement suggestion); managers build schedules, approve requests, review flagged punches, auto-generate or conversationally edit schedules with AI, scan timekeeping data for fraud signals, monitor a live dashboard, and export payroll to Gusto. A site-wide AI assistant answers schedule/hours/pay questions for any signed-in user.
 
-**Live demo:** deploy to [Vercel](https://vercel.com) (see [Deploy](#deploy-to-vercel) below).
+**Live demo:** [shift-wave.vercel.app](https://shift-wave.vercel.app) — see [Architecture & design writeup](docs/ShiftWave_Architecture_Writeup.pdf) for the full design rationale, assumptions, and roadmap.
 
 ---
 
@@ -49,7 +49,9 @@ Only **two Firebase Auth accounts** exist in the demo (one manager, one instruct
 |------|-------|--------------|
 | **My Schedule** | `/schedule` | Real-time list of your shifts for the selected week, grouped by day. "Export to Calendar" downloads an `.ics` file (all upcoming shifts) for one-way import into Google Calendar, Apple Calendar, or Outlook — no OAuth required |
 | **Clock In/Out** | `/clock` | Pick a demo-week shift, clock in with geolocation, clock out when done. Geofence + timing status computed client-side; all new punches land as `Needs Review` until a manager approves |
-| **Requests** | `/requests` | Submit time-off or shift-swap requests; view history and status |
+| **Timecard** | `/timecard` | Day-by-day worked-hours breakdown for the selected pay week (Mon–Sun), built from approved punches, with a Regular/Overtime split at 40h |
+| **Pay** | `/pay` | Simulated take-home pay for the selected week (gross − flat-rate tax estimate), with a donut chart — explicitly labeled as a demo estimate, not real payroll |
+| **Requests** | `/requests` | Submit time-off or shift-swap requests; view history and status. Swap requests include an **AI "Suggest best replacement"** button (see AI features below) |
 
 Managers also use employee pages — they work pool shifts and must be able to clock in.
 
@@ -58,10 +60,11 @@ Managers also use employee pages — they work pool shifts and must be able to c
 | Page | Route | What it does |
 |------|-------|--------------|
 | **Dashboard** | `/dashboard` | KPI cards, coverage and punch-review gauges, hours-per-employee chart, overtime risk, labor-cost estimate, coverage gaps |
-| **Schedule Editor** | `/schedule-editor` | Week grid (locations × days), add/edit/delete shifts, live conflict & coverage warnings, AI auto-scheduler |
+| **Schedule Editor** | `/schedule-editor` | Week grid (locations × days), add/edit/delete shifts, live conflict & coverage warnings, AI auto-scheduler, and a natural-language **Copilot** bar for conversational edits |
 | **Review Queue** | `/review-queue` | Real-time inbox of flagged punches; one-tap Approve / Reject |
 | **Approvals** | `/approvals` | Approve or deny pending time-off and swap requests |
 | **Payroll** | `/payroll` | Export Gusto-compatible CSV for approved punches only |
+| **Insights** | `/insights` | On-demand AI scan for suspicious timekeeping patterns — geofence-violation clusters and "buddy punching" (see AI features below) |
 
 ### Flagship differentiators
 
@@ -69,6 +72,20 @@ Managers also use employee pages — they work pool shifts and must be able to c
 2. **Punch Review Queue** — Auto-flagged punches (outside geofence or outside on-time window) with distance readout and one-tap resolution.
 3. **Conflict & Coverage Detection** — Live warnings in the editor: double-booking, ineligible location, over-hours, understaffed pool shifts (red cells).
 4. **Manager Dashboard** — Hours, overtime risk, labor-cost estimate, coverage gaps from the same validator logic as the editor.
+
+### AI features beyond the brief
+
+Every one of these follows the same rule: **the model never has unchecked authority.** It returns
+structured JSON/function-calls that pass through a deterministic validator before a human sees them,
+or it answers using only data explicitly handed to it in context — never inventing figures.
+
+| Feature | Where | How it works |
+|---------|-------|---------------|
+| **Manager Copilot** | `/schedule-editor` bar | Plain-English instructions ("move Avery's Tuesday shift to Thursday") become Gemini function-calls (`add_shift`/`remove_shift`/`reassign_shift`/`move_shift`) scoped to only real IDs in the current week; the result runs through `validateSchedule()` and shows a before/after diff before applying. |
+| **Punch Anomaly Detective** | `/insights` | `computeAnomalySignals()` first computes hard facts (geofence violation rate, avg. clock-in delta, "buddy-punch" clusters — ≥2 employees clocking in within 3 minutes of each other, both outside the geofence). Gemini only ranks and explains genuinely concerning patterns, grounded strictly in those numbers. |
+| **AI Swap Matchmaker** | `/requests` → Suggest best replacement | `buildSwapCandidates()` scores every coworker on eligibility, projected hours, conflicts, and time-off — all deterministic. Gemini ranks the shortlist and writes a one-line rationale per candidate. |
+| **In-app AI Assistant** | site-wide chat widget | Answers "what are my hours this week," "when do I work next," etc., scoped server-side to the signed-in user's own data only. Can compute simulated take-home pay live using the same formula as `/pay`. Resets on account switch so sessions never leak across users. |
+| **Calendar export** | `/schedule` → Export to Calendar | Not Gemini-powered, but Google-ecosystem-aligned: downloads a standards-compliant `.ics` file of all upcoming shifts for one-tap import into Google Calendar — no OAuth required. |
 
 ### App polish
 
@@ -206,27 +223,31 @@ After sign-in, you land on your role home:
 **Top navigation** (always visible when signed in):
 
 ```
-[ShiftWave]  Schedule | Clock In/Out | Requests | Dashboard | Editor | Review Queue | Approvals | Payroll     [theme toggle] [name] [Sign out]
-             └──────── employee links ────────┘  └──────────────── manager-only ────────────────┘
+[ShiftWave]  Schedule | Clock In/Out | Timecard | Pay | Requests | Dashboard | Editor | Review Queue | Approvals | Payroll | Insights     [theme toggle] [name] [Sign out]
+             └────────────── employee links ──────────────┘  └──────────────────────── manager-only ────────────────────────┘
 ```
+
+A chat-bubble **AI Assistant** widget floats over every page for any signed-in user.
 
 - **Review Queue** shows a red badge with the count of punches needing review (managers only).
 - **Theme toggle** — sun/moon pill switch on the right, before your name.
-- **Demo week** — Schedule, Clock, Dashboard, Editor, and Payroll pages include a "Demo week" button that jumps to the week of 2026-06-22.
+- **Demo week** — Schedule, Clock, Timecard, Pay, Dashboard, Editor, and Payroll pages include a "Demo week" button that jumps to the week of 2026-06-22.
 
 **Typical manager workflow:**
 
 1. Open **Dashboard** → scan coverage gaps and punches needing review.
-2. **Schedule Editor** → fix understaffed cells or run **Generate week with AI**.
+2. **Schedule Editor** → fix understaffed cells, run **Generate week with AI**, or type an instruction into the **Copilot** bar.
 3. **Review Queue** → approve/reject flagged punches.
-4. **Approvals** → resolve time-off and swap requests.
-5. **Payroll** → export approved hours as Gusto CSV.
+4. **Insights** → run an AI scan for buddy-punching / geofence-fraud patterns.
+5. **Approvals** → resolve time-off and swap requests.
+6. **Payroll** → export approved hours as Gusto CSV.
 
 **Typical employee workflow:**
 
-1. **Schedule** → confirm upcoming shifts.
+1. **Schedule** → confirm upcoming shifts, export to Google Calendar.
 2. **Clock In/Out** → select a shift, allow location, clock in/out.
-3. **Requests** → submit time-off or propose a swap.
+3. **Timecard / Pay** → check worked hours and an estimated paycheck.
+4. **Requests** → submit time-off, or propose a swap with an AI-suggested replacement.
 
 ---
 
@@ -266,7 +287,7 @@ node --env-file=.env.local scripts/link-users.mjs
 ```bash
 npm run build   # must pass before every commit
 npm start       # production server locally
-npm test        # Gusto overtime split unit test
+npm test        # unit tests: Gusto export, anomaly signals, swap matching, .ics calendar export
 ```
 
 ---
@@ -317,7 +338,7 @@ Verify rules in Firebase Console → Firestore → Rules → Rules Playground.
 | Dev server | `npm run dev` | Hot reload at localhost:3000 |
 | Build | `npm run build` | Production build + typecheck |
 | Lint | `npm run lint` | ESLint |
-| Test | `npm test` | Gusto CSV overtime split |
+| Test | `npm test` | Gusto CSV overtime split, anomaly signals, swap matching, `.ics` export |
 | Import data | `node --env-file=.env.local scripts/import-sample-data.mjs` | xlsx → Firestore |
 | Link users | `node --env-file=.env.local scripts/link-users.mjs` | Auth UID → `users/{uid}` docs |
 
@@ -329,14 +350,19 @@ Verify rules in Firebase Console → Firestore → Rules → Rules Playground.
 npm test
 ```
 
-Runs `src/lib/gusto.test.ts` — verifies the 40h/week regular/overtime split on unrounded minutes (synthetic >40h case). Seed punches are all under 40h; overtime is 0 in the demo export.
+Runs `src/lib/gusto.test.ts` (40h/week regular/overtime split on unrounded minutes), `anomalies.test.ts`, `swapMatch.test.ts`, and `ics.test.ts` (RFC 5545 structure + line folding for the calendar export). All pure-function modules — no Firebase, no network, no Gemini calls in tests.
 
 Manual smoke tests before demo:
 
-- [ ] Instructor login → `/schedule`, `/clock`, `/requests` work; `/dashboard` redirects to `/schedule`
+- [ ] Instructor login → `/schedule`, `/clock`, `/timecard`, `/pay`, `/requests` work; `/dashboard` redirects to `/schedule`
 - [ ] Manager login → all pages accessible; review queue badge updates live
 - [ ] Clock-in outside geofence → punch appears in review queue
 - [ ] AI scheduler → non-manager gets 401; manager gets draft + issues modal
+- [ ] Copilot → a plain-English instruction produces a sensible diff; nonsense input degrades gracefully
+- [ ] Insights → scan completes and only flags employees with real signal
+- [ ] Swap request → "Suggest best replacement" returns ranked, eligible candidates
+- [ ] AI Assistant → answers an hours/pay question using only the signed-in user's own data
+- [ ] Schedule → "Export to Calendar" downloads a valid `.ics` that imports into Google Calendar with correct times
 - [ ] Payroll export → only `Approved` punches; excluded list links to review queue
 - [ ] Theme toggle persists across refresh
 
@@ -382,6 +408,8 @@ Employee-facing queries are scoped to `where('employeeId', '==', ownId)` so list
 ├── firestore.rules         # Firestore security rules
 ├── data/
 │   └── scheduling_timekeeping_demo_sample_data.xlsx
+├── docs/
+│   └── ShiftWave_Architecture_Writeup.pdf   # Architecture, AI features, assumptions, roadmap
 ├── scripts/
 │   ├── import-sample-data.mjs
 │   └── link-users.mjs
@@ -389,22 +417,35 @@ Employee-facing queries are scoped to `where('employeeId', '==', ownId)` so list
 │   └── sw.js               # PWA service worker (network-only, no cache)
 └── src/
     ├── app/
-    │   ├── (employee)/     # /schedule, /clock, /requests
-    │   ├── (manager)/      # /dashboard, /schedule-editor, /review-queue, /approvals, /payroll
-    │   ├── api/generate-schedule/
+    │   ├── (employee)/     # /schedule, /clock, /timecard, /pay, /requests
+    │   ├── (manager)/      # /dashboard, /schedule-editor, /review-queue, /approvals, /payroll, /insights
+    │   ├── api/
+    │   │   ├── generate-schedule/   # AI auto-scheduler
+    │   │   ├── copilot/             # Natural-language schedule edits (function-calling)
+    │   │   ├── punch-anomalies/     # Anomaly Detective
+    │   │   ├── swap-suggestions/    # AI Swap Matchmaker
+    │   │   └── assistant/           # Site-wide chat assistant
     │   ├── login/
     │   ├── layout.tsx
     │   ├── manifest.ts     # PWA manifest
     │   └── icon.tsx        # App icon (ImageResponse)
-    ├── components/         # TopNav, ThemeToggle, charts, modals, …
+    ├── components/         # TopNav, ThemeToggle, AssistantWidget, CopilotPanel, charts, gauges, modals, …
     └── lib/
         ├── auth.tsx        # Auth context + role resolution
         ├── theme.tsx       # Dark/light mode context
         ├── constants.ts    # Coverage rules, geofence, pay rates
         ├── types.ts        # Data model types
         ├── validators.ts   # Conflict & coverage (pure functions)
-        ├── geofence.ts     # Haversine + timing
-        ├── gusto.ts        # CSV builder
+        ├── geofence.ts      # Haversine + timing
+        ├── gusto.ts        # Payroll CSV builder
+        ├── ics.ts          # Google/Apple/Outlook calendar (.ics) builder
+        ├── anomalies.ts    # Punch anomaly signal computation
+        ├── swapMatch.ts    # Swap-candidate scoring
+        ├── copilot.ts      # Copilot function-call → schedule-op resolver
+        ├── pay.ts / payHours.ts   # Simulated pay & hours math
+        ├── weekHelpers.ts
+        ├── gemini.ts       # Gemini client + model constant
+        ├── apiAuth.ts      # Shared API route auth helpers
         ├── firebase.client.ts
         └── firebase.admin.ts
 ```
@@ -412,6 +453,8 @@ Employee-facing queries are scoped to `where('employeeId', '==', ownId)` so list
 ---
 
 ## Deploy to Vercel
+
+The live demo runs at [shift-wave.vercel.app](https://shift-wave.vercel.app), auto-deployed from `main`. To deploy your own instance:
 
 1. Push to GitHub (Vercel auto-deploys on push to `main`).
 2. In Vercel project settings → **Environment Variables**, set all vars from [Environment variables](#environment-variables).
