@@ -23,6 +23,7 @@ const MANAGER_EXTRA_LINKS = [
   { href: '/review-queue', label: 'Review Queue' },
   { href: '/approvals', label: 'Approvals' },
   { href: '/payroll', label: 'Payroll' },
+  { href: '/insights', label: 'Insights' },
 ] as const;
 
 export default function TopNav() {

@@ -20,6 +20,7 @@ import type { Employee, Issue, Location, Shift } from '@/lib/types';
 import ShiftFormModal from '@/components/ShiftFormModal';
 import CoverageSummary from '@/components/CoverageSummary';
 import AISchedulerModal from '@/components/AISchedulerModal';
+import CopilotPanel from '@/components/CopilotPanel';
 
 // ---------------------------------------------------------------------------
 // Per-cell coverage (reuses the pure validators)
@@ -305,6 +306,11 @@ export default function ScheduleEditorPage() {
         <div className="flex justify-center py-24">
           <span className="h-6 w-6 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
         </div>
+      )}
+
+      {/* AI Copilot command bar */}
+      {!loading && (
+        <CopilotPanel weekDates={weekDates} rangeLabel={rangeLabel} onApplied={loadShifts} />
       )}
 
       {/* Coverage & conflict summary */}

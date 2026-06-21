@@ -199,7 +199,17 @@ function TimeOffSection({ employeeId }: { employeeId: string }) {
 // Swap request section
 // ---------------------------------------------------------------------------
 
+interface SwapSuggestion {
+  employeeId: string;
+  name: string;
+  rank: number;
+  reason: string;
+  hoursThisWeek: number;
+  warnings: string[];
+}
+
 function SwapSection({ employeeId }: { employeeId: string }) {
+  const { firebaseUser } = useAuth();
   const [shifts, setShifts] = useState<Shift[]>([]);
   // allShiftsMap keeps all shifts for history display even after they're
   // removed from the picker (because they have a pending swap).
@@ -213,6 +223,11 @@ function SwapSection({ employeeId }: { employeeId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // AI swap matchmaker
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState('');
+  const [suggestions, setSuggestions] = useState<SwapSuggestion[] | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -276,10 +291,34 @@ function SwapSection({ employeeId }: { employeeId: string }) {
         : false),
   );
 
-  // Reset replacement when the shift changes.
+  // Reset replacement + suggestions when the shift changes.
   const handleShiftChange = (shiftId: string) => {
     setSelectedShiftId(shiftId);
     setSelectedReplacementId('');
+    setSuggestions(null);
+    setSuggestError('');
+  };
+
+  const handleSuggest = async () => {
+    if (!firebaseUser || !selectedShiftId || suggesting) return;
+    setSuggesting(true);
+    setSuggestError('');
+    setSuggestions(null);
+    try {
+      const token = await firebaseUser.getIdToken();
+      const res = await fetch('/api/swap-suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ shiftId: selectedShiftId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? 'Could not get suggestions.');
+      setSuggestions((data.suggestions ?? []) as SwapSuggestion[]);
+    } catch (err) {
+      setSuggestError(err instanceof Error ? err.message : 'Could not get suggestions.');
+    } finally {
+      setSuggesting(false);
+    }
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -378,6 +417,63 @@ function SwapSection({ employeeId }: { employeeId: string }) {
                 <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-600">
                   Showing employees eligible for {selectedShift.locationName}.
                 </p>
+              )}
+            </div>
+
+            {/* AI swap matchmaker */}
+            <div>
+              <button
+                type="button"
+                onClick={handleSuggest}
+                disabled={!selectedShiftId || suggesting}
+                className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-900/50 dark:bg-violet-950/30 dark:text-violet-300 dark:hover:bg-violet-950/50"
+              >
+                {suggesting ? 'Finding best matches…' : '✨ Suggest best replacement'}
+              </button>
+
+              {suggestError && (
+                <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                  {suggestError}
+                </p>
+              )}
+
+              {suggestions && suggestions.length === 0 && (
+                <p className="mt-2 text-sm text-zinc-400 dark:text-zinc-600">
+                  No suitable replacements found for this shift.
+                </p>
+              )}
+
+              {suggestions && suggestions.length > 0 && (
+                <div className="mt-3 flex flex-col gap-2">
+                  {suggestions.map((s) => {
+                    const active = selectedReplacementId === s.employeeId;
+                    return (
+                      <button
+                        key={s.employeeId}
+                        type="button"
+                        onClick={() => setSelectedReplacementId(s.employeeId)}
+                        className={`rounded-xl border px-4 py-3 text-left transition ${
+                          active
+                            ? 'border-violet-500 bg-violet-50 ring-2 ring-violet-500/20 dark:border-violet-500 dark:bg-violet-950/30'
+                            : 'border-black/10 bg-white hover:border-violet-300 dark:border-white/10 dark:bg-zinc-950 dark:hover:border-violet-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-semibold">{s.name}</span>
+                          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                            {s.hoursThisWeek}h this week
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400">{s.reason}</p>
+                        {s.warnings.length > 0 && (
+                          <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                            ⚠ {s.warnings.join(' · ')}
+                          </p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
 

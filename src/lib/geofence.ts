@@ -1,8 +1,8 @@
 // Pure geofence helpers — no Firebase imports.
 // Used by the clock-in page and (from Phase 5) the review queue.
 
-import { GEOFENCE } from '@/lib/constants';
-import type { GeofenceStatus, Location, TimingStatus } from '@/lib/types';
+import { GEOFENCE } from './constants';
+import type { GeofenceStatus, Location, TimingStatus } from './types';
 
 // ---------------------------------------------------------------------------
 // Haversine distance
