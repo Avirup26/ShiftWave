@@ -159,79 +159,87 @@ export default function ClockPage() {
     setActionShiftId(shift.id);
     setStatusMessage('');
 
-    const location = locationMap[shift.locationId];
-    const clockInTime = nowCentralHHMM();
-    const date = todayCentral();
-
-    let geofenceStatus: GeofenceStatus = 'No Geofence';
-    let clockInLat: number | null = null;
-    let clockInLng: number | null = null;
-
     try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10_000,
+      const location = locationMap[shift.locationId];
+      const clockInTime = nowCentralHHMM();
+      const date = todayCentral();
+
+      let geofenceStatus: GeofenceStatus = 'No Geofence';
+      let clockInLat: number | null = null;
+      let clockInLng: number | null = null;
+      let locationUnavailable = false;
+
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10_000,
+          });
         });
-      });
-      clockInLat = pos.coords.latitude;
-      clockInLng = pos.coords.longitude;
-      if (location) {
-        geofenceStatus = computeGeofenceStatus(clockInLat, clockInLng, location);
+        clockInLat = pos.coords.latitude;
+        clockInLng = pos.coords.longitude;
+        if (location) {
+          geofenceStatus = computeGeofenceStatus(clockInLat, clockInLng, location);
+        }
+      } catch {
+        // getCurrentPosition failed (denied, timeout, unavailable).
+        // If this location requires a geofence check, use 'Location Error' so
+        // the punch is always flagged for review — never auto-approved.
+        // If the location genuinely has no geofence requirement, fall through to
+        // the existing 'No Geofence' default.
+        if (location?.geofenceRequired) {
+          geofenceStatus = 'Location Error';
+        }
+        locationUnavailable = true;
       }
-    } catch {
-      // getCurrentPosition failed (denied, timeout, unavailable).
-      // If this location requires a geofence check, use 'Location Error' so
-      // the punch is always flagged for review — never auto-approved.
-      // If the location genuinely has no geofence requirement, fall through to
-      // the existing 'No Geofence' default.
-      if (location?.geofenceRequired) {
-        geofenceStatus = 'Location Error';
-      }
-      setStatusMessage('Location unavailable — punch recorded and flagged for review.');
-    }
 
-    const clockInTimingStatus: TimingStatus = computeTimingStatus(
-      clockInTime,
-      shift.startTime,
-    );
-
-    const needsReview =
-      geofenceStatus === 'Outside Geofence' ||
-      geofenceStatus === 'Location Error' ||
-      clockInTimingStatus === 'Outside Window';
-
-    const punchData: Omit<Punch, 'id'> = {
-      shiftId: shift.id,
-      employeeId: employee.id,
-      date,
-      locationId: shift.locationId,
-      scheduledStart: shift.startTime,
-      scheduledEnd: shift.endTime,
-      clockIn: clockInTime,
-      clockOut: null,
-      clockInLat,
-      clockInLng,
-      geofenceStatus,
-      clockInTimingStatus,
-      managerReviewStatus: 'Needs Review',
-    };
-
-    const docRef = await addDoc(collection(db, 'punches'), punchData);
-    // Mirror the auto-generated Firestore ID into the id field.
-    await updateDoc(docRef, { id: docRef.id });
-
-    const newPunch: Punch = { ...punchData, id: docRef.id };
-    setPunchMap((prev) => ({ ...prev, [shift.id]: newPunch }));
-
-    if (!statusMessage) {
-      setStatusMessage(
-        needsReview
-          ? 'Clocked in — punch flagged for manager review.'
-          : 'Clocked in — pending manager approval.',
+      const clockInTimingStatus: TimingStatus = computeTimingStatus(
+        clockInTime,
+        shift.startTime,
       );
+
+      const needsReview =
+        geofenceStatus === 'Outside Geofence' ||
+        geofenceStatus === 'Location Error' ||
+        clockInTimingStatus === 'Outside Window';
+
+      const punchData: Omit<Punch, 'id'> = {
+        shiftId: shift.id,
+        employeeId: employee.id,
+        date,
+        locationId: shift.locationId,
+        scheduledStart: shift.startTime,
+        scheduledEnd: shift.endTime,
+        clockIn: clockInTime,
+        clockOut: null,
+        clockInLat,
+        clockInLng,
+        geofenceStatus,
+        clockInTimingStatus,
+        managerReviewStatus: 'Needs Review',
+      };
+
+      const docRef = await addDoc(collection(db, 'punches'), punchData);
+      // Mirror the auto-generated Firestore ID into the id field.
+      await updateDoc(docRef, { id: docRef.id });
+
+      const newPunch: Punch = { ...punchData, id: docRef.id };
+      setPunchMap((prev) => ({ ...prev, [shift.id]: newPunch }));
+
+      setStatusMessage(
+        locationUnavailable
+          ? 'Location unavailable — punch recorded and flagged for review.'
+          : needsReview
+            ? 'Clocked in — punch flagged for manager review.'
+            : 'Clocked in — pending manager approval.',
+      );
+    } catch (err) {
+      setStatusMessage(
+        `Clock-in failed: ${err instanceof Error ? err.message : 'unknown error'}. Please try again.`,
+      );
+    } finally {
+      setActionShiftId(null);
     }
-    setActionShiftId(null);
   }
 
   // -------------------------------------------------------------------------
@@ -244,22 +252,30 @@ export default function ClockPage() {
     setActionShiftId(shift.id);
     setStatusMessage('');
 
-    const clockOutTime = nowCentralHHMM();
+    try {
+      const clockOutTime = nowCentralHHMM();
 
-    // Find the Firestore doc by querying on id field (auto-ID was mirrored into id).
-    const punchSnap = await getDocs(
-      query(collection(db, 'punches'), where('id', '==', punch.id)),
-    );
-    if (!punchSnap.empty) {
+      // Find the Firestore doc by querying on id field (auto-ID was mirrored into id).
+      const punchSnap = await getDocs(
+        query(collection(db, 'punches'), where('id', '==', punch.id)),
+      );
+      if (punchSnap.empty) {
+        throw new Error('Punch record not found — it may have been removed.');
+      }
       await updateDoc(punchSnap.docs[0].ref, { clockOut: clockOutTime });
-    }
 
-    setPunchMap((prev) => ({
-      ...prev,
-      [shift.id]: { ...punch, clockOut: clockOutTime },
-    }));
-    setStatusMessage('Clocked out successfully.');
-    setActionShiftId(null);
+      setPunchMap((prev) => ({
+        ...prev,
+        [shift.id]: { ...punch, clockOut: clockOutTime },
+      }));
+      setStatusMessage('Clocked out successfully.');
+    } catch (err) {
+      setStatusMessage(
+        `Clock-out failed: ${err instanceof Error ? err.message : 'unknown error'}. Please try again.`,
+      );
+    } finally {
+      setActionShiftId(null);
+    }
   }
 
   // -------------------------------------------------------------------------
