@@ -5,7 +5,6 @@ import {
   query,
   where,
   getDocs,
-  getDoc,
   addDoc,
   updateDoc,
   doc,
@@ -255,14 +254,14 @@ export default function ClockPage() {
     try {
       const clockOutTime = nowCentralHHMM();
 
-      // Find the Firestore doc by querying on id field (auto-ID was mirrored into id).
-      const punchSnap = await getDocs(
-        query(collection(db, 'punches'), where('id', '==', punch.id)),
-      );
-      if (punchSnap.empty) {
-        throw new Error('Punch record not found — it may have been removed.');
-      }
-      await updateDoc(punchSnap.docs[0].ref, { clockOut: clockOutTime });
+      // punch.id IS the Firestore document ID (mirrored into the `id` field at
+      // clock-in time) — reference it directly rather than querying for it.
+      // A `where('id', '==', ...)` list query can't be security-rule-validated
+      // here since the punches rule checks `employeeId`, not `id`, and
+      // Firestore rejects list queries whose rule can't be proven from the
+      // query's own filters — even though a single-document get/update on the
+      // same doc is allowed.
+      await updateDoc(doc(db, 'punches', punch.id), { clockOut: clockOutTime });
 
       setPunchMap((prev) => ({
         ...prev,
